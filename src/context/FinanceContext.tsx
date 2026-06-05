@@ -66,26 +66,20 @@ interface FinanceContextType {
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
-const initialTransactions: Transaction[] = [
-  { id: '1', date: '2026-06-01', category: 'Salary', description: 'Monthly Corporate Salary', amount: 6500, type: 'income' },
-  { id: '2', date: '2026-06-01', category: 'Housing', description: 'Metropolitan Apartment Rent', amount: 1800, type: 'expense' },
-  { id: '3', date: '2026-06-02', category: 'Food', description: 'Organic Grocery Purchase - Whole Foods', amount: 245.50, type: 'expense' },
-  { id: '4', date: '2026-05-28', category: 'Entertainment', description: 'Netflix Ultra HD Subscription', amount: 22.99, type: 'expense' },
-  { id: '5', date: '2026-06-02', category: 'Transport', description: 'Chevron Station Refuel', amount: 65.00, type: 'expense' },
-  { id: '6', date: '2026-06-01', category: 'Health', description: 'Equinox Gym Membership', amount: 120.00, type: 'expense' },
-  { id: '7', date: '2026-05-30', category: 'Salary', description: 'Freelance Design Retainer', amount: 950, type: 'income' },
-  { id: '8', date: '2026-06-02', category: 'Food', description: 'Starbucks Coffee & Pastry', amount: 14.50, type: 'expense' },
-  { id: '9', date: '2026-05-29', category: 'Shopping', description: 'Apple Store - USB-C Charger', amount: 39.00, type: 'expense' },
-];
+const initialTransactions: Transaction[] = [];
 
-const initialSavingsGoals: SavingsGoal[] = [
-  { id: 'g1', name: 'Emergency Fund', target: 10000, current: 4500, category: 'Security' },
-  { id: 'g2', name: 'Europe Summer Trip', target: 5000, current: 1800, category: 'Leisure' },
-  { id: 'g3', name: 'Tesla Down Payment', target: 15000, current: 2500, category: 'Transport' },
-];
+const initialSavingsGoals: SavingsGoal[] = [];
 
 const initialChatMessages: ChatMessage[] = [
-  { id: 'm1', sender: 'ai', text: "Hello! I am your BudgetSync AI assistant. Ask me anything about your current budget, recent expenses, or tips to improve your financial wellness.", timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
+  {
+    id: 'm1',
+    sender: 'ai',
+    text: "Welcome to BudgetSync AI! Add your income and expenses to get personalized budget insights and analytics.",
+    timestamp: new Date().toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  },
 ];
 
 export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -111,7 +105,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [adminSettings, setAdminSettings] = useState<AdminSettings>(() => {
     const saved = localStorage.getItem('budgetsync_admin');
     return saved ? JSON.parse(saved) : {
-      budgetLimit: 3500,
+      budgetLimit: 50000,
       savingsGoalRatio: 20,
       recommendationRule: 'moderate'
     };
@@ -261,13 +255,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           : "⚠️ High Spending Alert: Expenses exceed 70% of income. We advise checking food & entertainment subscription totals."
       );
     } else if (expenseRatio < 0.4 && totalIncome > 0) {
-      recommendations.push("✨ Excellent Budgeting: You are spending under 40% of your income. Consider allocating $300 to your Europe summer trip.");
+      recommendations.push("✨ Excellent Budgeting: You are spending under 40% of your income. Consider allocating ₹300 to your Europe summer trip.");
     }
 
     if (totalExpenses > adminSettings.budgetLimit) {
-      recommendations.push(`🚨 Budget Cap Exceeded: Spending ($${totalExpenses.toFixed(2)}) is over your threshold of $${adminSettings.budgetLimit}.`);
+      recommendations.push(`🚨 Budget Cap Exceeded: Spending (₹${totalExpenses.toFixed(2)}) is over your threshold of ₹${adminSettings.budgetLimit}.`);
     } else if (adminSettings.budgetLimit - totalExpenses < 300) {
-      recommendations.push(`⏳ Limit Approaching: You have only $${(adminSettings.budgetLimit - totalExpenses).toFixed(2)} left in your monthly cap.`);
+      recommendations.push(`⏳ Limit Approaching: You have only ₹${(adminSettings.budgetLimit - totalExpenses).toFixed(2)} left in your monthly cap.`);
     }
 
     // Category specific recommendations
@@ -276,7 +270,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       .reduce((sum, tx) => sum + tx.amount, 0);
 
     if (foodExpenses > 400) {
-      recommendations.push(`🍔 Food Spending: Grocery and takeout spending totals $${foodExpenses.toFixed(2)}. Preparing more meals at home could save you $80/month.`);
+      recommendations.push(`🍔 Food Spending: Grocery and takeout spending totals ₹${foodExpenses.toFixed(2)}. Preparing more meals at home could save you ₹80/month.`);
     }
 
     // Default savings tip
@@ -303,6 +297,36 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const financialMetrics = calculateMetrics();
+  useEffect(() => {
+  const spent = financialMetrics.totalExpenses;
+  const limit = adminSettings.budgetLimit;
+
+  if (limit <= 0) return;
+
+  const percentage = (spent / limit) * 100;
+
+  if (percentage >= 100) {
+    alert(
+      `❌ Budget Exceeded!\n\nYou exceeded your budget.\n\nBudget: ₹${limit}\nSpent: ₹${spent.toFixed(2)}`
+    );
+  } 
+  else if (percentage >= 95) {
+    alert(
+      `🚨 Spending Danger Alert!\n\nYou are very close to finishing your budget.\n\nRemaining: ₹${(
+        limit - spent
+      ).toFixed(2)}`
+    );
+  } 
+  else if (percentage >= 80) {
+    alert(
+      `⚠️ Budget Warning!\n\nYou have used ${Math.round(
+        percentage
+      )}% of your budget.\n\nRemaining: ₹${(
+        limit - spent
+      ).toFixed(2)}`
+    );
+  }
+}, [financialMetrics.totalExpenses, adminSettings.budgetLimit]);
 
   // AI Assistant simulated chat responder
   const sendMessageToAI = async (text: string) => {
@@ -334,24 +358,38 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const topCatText = Object.entries(topExpenseCategories)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 3)
-        .map(([cat, amt]) => `• ${cat}: $${amt.toFixed(2)}`)
+        .map(([cat, amt]) => `• ${cat}: ₹${amt.toFixed(2)}`)
         .join('\n');
 
-      reply = `Based on your live profile, you have spent **$${metrics.totalExpenses.toFixed(2)}** out of **$${metrics.totalIncome.toFixed(2)}** in earnings (Expense Ratio: **${Math.round((metrics.totalExpenses / metrics.totalIncome) * 100)}%**).\n\nYour highest cost centers are:\n${topCatText || 'No recorded expenses'}\n\n*Recommendation*: Keep an eye on your **$${adminSettings.budgetLimit}** budget ceiling. You are currently ${metrics.totalExpenses > adminSettings.budgetLimit ? 'EXCEEDING' : 'within'} this threshold.`;
+      const expenseRatio =
+  metrics.totalIncome > 0
+    ? Math.round((metrics.totalExpenses / metrics.totalIncome) * 100)
+    : 0;
+
+reply = `Based on your live profile, you have spent **₹${metrics.totalExpenses.toFixed(2)}** out of **₹${metrics.totalIncome.toFixed(2)}** in earnings (Expense Ratio: **${expenseRatio}%**).
+
+Your highest cost centers are:
+${topCatText || 'No recorded expenses'}
+
+*Recommendation*: Keep an eye on your **₹${adminSettings.budgetLimit}** budget ceiling. You are currently ${
+  metrics.totalExpenses > adminSettings.budgetLimit
+    ? 'EXCEEDING'
+    : 'within'
+} this threshold.`;
     } 
     else if (lowerText.includes('health') || lowerText.includes('score')) {
-      reply = `Your Financial Health Score is currently **${metrics.healthScore}/100**. Here is the breakdown:\n\n1. **Adherence to Budget Limit (${metrics.totalExpenses > adminSettings.budgetLimit ? 'needs work' : 'excellent'})**: Spending is at $${metrics.totalExpenses.toFixed(2)} vs the $${adminSettings.budgetLimit} limit.\n2. **Savings Plan (Active)**: You have saved $${savingsGoals.reduce((sum, g) => sum + g.current, 0)} across ${savingsGoals.length} goals.\n3. **Debt-to-Savings Ratio**: High liquidity helps your safety margin.\n\n*Action*: To boost this score to 90+, try allocating $150 to your savings goals or reducing food takeaway spending.`;
+      reply = `Your Financial Health Score is currently **${metrics.healthScore}/100**. Here is the breakdown:\n\n1. **Adherence to Budget Limit (${metrics.totalExpenses > adminSettings.budgetLimit ? 'needs work' : 'excellent'})**: Spending is at ₹${metrics.totalExpenses.toFixed(2)} vs the ₹${adminSettings.budgetLimit} limit.\n2. **Savings Plan (Active)**: You have saved ₹${savingsGoals.reduce((sum, g) => sum + g.current, 0)} across ${savingsGoals.length} goals.\n3. **Debt-to-Savings Ratio**: High liquidity helps your safety margin.\n\n*Action*: To boost this score to 90+, try allocating ₹150 to your savings goals or reducing food takeaway spending.`;
     } 
     else if (lowerText.includes('save') || lowerText.includes('savings') || lowerText.includes('trip') || lowerText.includes('emergency')) {
-      const goalsList = savingsGoals.map(g => `• **${g.name}**: $${g.current} of $${g.target} (${Math.round((g.current/g.target)*100)}%)`).join('\n');
+      const goalsList = savingsGoals.map(g => `• **${g.name}**: ₹${g.current} of ₹${g.target} (${Math.round((g.current/g.target)*100)}%)`).join('\n');
       reply = `You have **${savingsGoals.length}** active savings targets:\n${goalsList}\n\nTo increase your savings: \n1. Contribute freelance earnings directly using the 'Savings Tracker' card.\n2. Set up direct transfers. If you increase your savings rate to **${metrics.savingsRate + 5}%**, you'll reach your 'Europe Summer Trip' goal 2 weeks earlier.`;
     } 
     else if (lowerText.includes('salary') || lowerText.includes('income') || lowerText.includes('freelance')) {
       const salaries = transactions.filter(t => t.type === 'income');
-      reply = `I see **${salaries.length}** source(s) of income totaling **$${metrics.totalIncome.toFixed(2)}**. Your baseline Salary is $6,500.00 and freelance gigs brought in another $950.00.\n\nIncreasing monthly freelance contracts by $500 could allow you to fully fund your Emergency Fund in less than 3 months.`;
+      reply = `I see **${salaries.length}** source(s) of income totaling **₹${metrics.totalIncome.toFixed(2)}**. Your baseline Salary is ₹6,500.00 and freelance gigs brought in another ₹950.00.\n\nIncreasing monthly freelance contracts by ₹500 could allow you to fully fund your Emergency Fund in less than 3 months.`;
     }
     else {
-      reply = `I have analyzed your BudgetSync AI ledger. \n\n• Current Monthly Balance: **$${metrics.remainingBalance.toFixed(2)}**\n• Health Index: **${metrics.healthScore}/100**\n• Expenses: **$${metrics.totalExpenses.toFixed(2)}**\n\nIs there a specific transaction category or savings target you want me to audit? You can ask things like *"Analyze my spending"* or *"How is my health score calculated?"*`;
+      reply = `I have analyzed your BudgetSync AI ledger. \n\n• Current Monthly Balance: **₹${metrics.remainingBalance.toFixed(2)}**\n• Health Index: **${metrics.healthScore}/100**\n• Expenses: **₹${metrics.totalExpenses.toFixed(2)}**\n\nIs there a specific transaction category or savings target you want me to audit? You can ask things like *"Analyze my spending"* or *"How is my health score calculated?"*`;
     }
 
     const aiMessage: ChatMessage = {

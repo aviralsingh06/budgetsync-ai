@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { 
   TrendingUp, 
@@ -8,8 +8,19 @@ import {
   Lightbulb, 
   Activity, 
   Plus,
-  Trash2
+  Trash2,
+  X
 } from 'lucide-react';
+
+type AlertSeverity = 'warning' | 'critical' | 'exceeded' | 'velocity';
+
+interface AlertEntry {
+  id: string;
+  title: string;
+  message: string;
+  severity: AlertSeverity;
+  timestamp: string;
+}
 
 export const Dashboard: React.FC = () => {
   const { 
@@ -26,6 +37,18 @@ export const Dashboard: React.FC = () => {
   const [amt, setAmt] = useState('');
   const [cat, setCat] = useState('Food');
   const [txType, setTxType] = useState<'expense' | 'income'>('expense');
+  const [currentAlert, setCurrentAlert] = useState<AlertEntry | null>(null);
+  const [alertHistory, setAlertHistory] = useState<AlertEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem('budgetsync_alert_history');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [popupVisible, setPopupVisible] = useState(false);
+  const [bannerVisible, setBannerVisible] = useState(true);
+  const [lastAlertSignature, setLastAlertSignature] = useState('');
 
   // Savings contribution modal helper
   const [contribAmt, setContribAmt] = useState('');
@@ -53,6 +76,142 @@ export const Dashboard: React.FC = () => {
     addSavingsContribution(selectedGoalId, parseFloat(contribAmt));
     setContribAmt('');
   };
+
+  const spendingMetrics = useMemo(() => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    const daysElapsed = Math.max(1, now.getDate());
+    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+
+    const expenseTransactions = transactions.filter(tx => tx.type === 'expense');
+    const currentMonthExpenses = expenseTransactions.filter(tx => {
+      const txDate = new Date(tx.date);
+      return txDate.getMonth() === currentMonth && txDate.getFullYear() === currentYear;
+    });
+
+    const totalCurrentMonthExpenses = currentMonthExpenses.reduce((sum, tx) => sum + tx.amount, 0);
+    const usageRatio = adminSettings.budgetLimit > 0 ? totalCurrentMonthExpenses / adminSettings.budgetLimit : 0;
+    const dailyPace = totalCurrentMonthExpenses / daysElapsed;
+
+    const recentWindowDays = 3;
+    const priorWindowDays = 14;
+    const recentStart = new Date(now);
+    recentStart.setDate(now.getDate() - recentWindowDays + 1);
+    const priorEnd = new Date(recentStart);
+    priorEnd.setDate(recentStart.getDate() - 1);
+    const priorStart = new Date(priorEnd);
+    priorStart.setDate(priorEnd.getDate() - priorWindowDays + 1);
+
+    const windowTotal = (from: Date, to: Date) => expenseTransactions
+      .filter(tx => {
+        const txDate = new Date(tx.date);
+        return txDate >= from && txDate <= to;
+      })
+      .reduce((sum, tx) => sum + tx.amount, 0);
+
+    const recentTotal = windowTotal(recentStart, now);
+    const priorTotal = windowTotal(priorStart, priorEnd);
+    const recentAverage = recentTotal / recentWindowDays;
+    const priorAverage = priorTotal / priorWindowDays;
+    const highVelocity = priorAverage > 0 && recentAverage > priorAverage * 1.5;
+
+    const alerts: AlertEntry[] = [];
+    const usagePercentage = Math.round(usageRatio * 100);
+
+    if (totalCurrentMonthExpenses > adminSettings.budgetLimit) {
+      alerts.push({
+        id: 'exceeded',
+        title: 'Budget Limit Exceeded',
+        message: 'Your spending has exceeded the planned monthly budget. Review recent transactions and adjust financial goals.',
+        severity: 'exceeded',
+        timestamp: now.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+      });
+    } else if (usagePercentage >= 90) {
+      alerts.push({
+        id: 'critical',
+        title: 'Critical Spending Alert',
+        message: 'You have consumed over 90% of your allocated budget. Immediate spending review is recommended.',
+        severity: 'critical',
+        timestamp: now.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+      });
+    } else if (usagePercentage >= 80) {
+      alerts.push({
+        id: 'warning',
+        title: 'Budget Warning',
+        message: 'You have used 80% of your monthly budget. Consider reducing discretionary spending to avoid exceeding your limit.',
+        severity: 'warning',
+        timestamp: now.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+      });
+    }
+
+    if (highVelocity) {
+      alerts.push({
+        id: 'velocity',
+        title: 'Unusual Spending Activity',
+        message: 'Your spending rate is significantly higher than your recent average. Monitor transactions to maintain financial stability.',
+        severity: 'velocity',
+        timestamp: now.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+      });
+    }
+
+    const active = alerts.find(alert => alert.severity === 'exceeded')
+      || alerts.find(alert => alert.severity === 'critical')
+      || alerts.find(alert => alert.severity === 'warning')
+      || alerts.find(alert => alert.severity === 'velocity') || null;
+
+    return {
+      totalCurrentMonthExpenses,
+      usagePercentage,
+      dailyPace: Math.round(dailyPace * 100) / 100,
+      projectedMonth: Math.round(dailyPace * daysInMonth),
+      highVelocity,
+      recentAverage: Math.round(recentAverage * 100) / 100,
+      priorAverage: Math.round(priorAverage * 100) / 100,
+      activeAlert: active,
+      currentMonthTransactions: currentMonthExpenses.length
+    };
+  }, [transactions, adminSettings.budgetLimit]);
+
+  useEffect(() => {
+    const active = spendingMetrics.activeAlert;
+    if (!active) return;
+
+    const signature = `${active.title}|${active.message}`;
+    if (signature === lastAlertSignature) {
+      setCurrentAlert(active);
+      return;
+    }
+
+    setLastAlertSignature(signature);
+    setCurrentAlert(active);
+    setPopupVisible(true);
+    setBannerVisible(true);
+
+    setAlertHistory(prev => {
+      const next = [active, ...prev];
+      try {
+        localStorage.setItem('budgetsync_alert_history', JSON.stringify(next));
+      } catch {
+        // ignore localStorage errors
+      }
+      return next;
+    });
+  }, [spendingMetrics.activeAlert, lastAlertSignature]);
+
+  useEffect(() => {
+    if (!popupVisible) return undefined;
+    const timer = window.setTimeout(() => setPopupVisible(false), 10000);
+    return () => window.clearTimeout(timer);
+  }, [popupVisible]);
+
+  useEffect(() => {
+    if (!spendingMetrics.activeAlert) {
+      setCurrentAlert(null);
+      setBannerVisible(false);
+      return;
+    }
+  }, [spendingMetrics.activeAlert]);
 
   // Group transactions by category to show progress bars
   const categoryExpenses = transactions
@@ -109,6 +268,38 @@ export const Dashboard: React.FC = () => {
           Budget Limit: <strong style={{ color: 'var(--text-primary)' }}>${adminSettings.budgetLimit.toFixed(0)}</strong>
         </div>
       </div>
+
+      {/* Alert Banner */}
+      {spendingMetrics.activeAlert && bannerVisible && (
+        <div className={`budget-alert-banner ${spendingMetrics.activeAlert.severity}`}>
+          <div>
+            <strong>{spendingMetrics.activeAlert.title}</strong>
+            <p>{spendingMetrics.activeAlert.message}</p>
+          </div>
+          <button onClick={() => setBannerVisible(false)} aria-label="Dismiss alert">
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {currentAlert && popupVisible && (
+        <div className={`budget-alert-popup ${currentAlert.severity}`}>
+          <div className="alert-popup-header">
+            <div>
+              <strong>{currentAlert.title}</strong>
+              <span>{currentAlert.timestamp}</span>
+            </div>
+            <button onClick={() => setPopupVisible(false)} aria-label="Close alert popup">
+              <X size={16} />
+            </button>
+          </div>
+          <p>{currentAlert.message}</p>
+          <div className="alert-popup-meta">
+            <span>Budget used: {spendingMetrics.usagePercentage}%</span>
+            <span>Daily pace: ${spendingMetrics.dailyPace.toFixed(2)} / day</span>
+          </div>
+        </div>
+      )}
 
       {/* Cards Row */}
       <div style={{
@@ -198,6 +389,75 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
 
+      </div>
+
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+        gap: '1.5rem',
+        marginBottom: '2rem'
+      }}>
+        <div className="glass-card alert-card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', marginBottom: '1rem' }}>
+            <div>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Budget Risk Dashboard
+              </span>
+              <h3 style={{ fontSize: '1.4rem', marginTop: '0.6rem' }}>Live Spending Alerts</h3>
+            </div>
+            {spendingMetrics.activeAlert && (
+              <span className={`alert-pill ${spendingMetrics.activeAlert.severity}`}>
+                {spendingMetrics.activeAlert.severity.toUpperCase()}
+              </span>
+            )}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
+            <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--border-radius-sm)' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Current Spending</span>
+              <div style={{ fontSize: '1.6rem', fontWeight: 700, marginTop: '0.5rem' }}>${spendingMetrics.totalCurrentMonthExpenses.toFixed(2)}</div>
+            </div>
+            <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--border-radius-sm)' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Remaining Balance</span>
+              <div style={{ fontSize: '1.6rem', fontWeight: 700, marginTop: '0.5rem' }}>${financialMetrics.remainingBalance.toFixed(2)}</div>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--border-radius-sm)' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Budget Used</span>
+              <div style={{ fontSize: '1.6rem', fontWeight: 700, marginTop: '0.5rem' }}>{spendingMetrics.usagePercentage}%</div>
+            </div>
+            <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--border-radius-sm)' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Spending Rate</span>
+              <div style={{ fontSize: '1.6rem', fontWeight: 700, marginTop: '0.5rem' }}>${spendingMetrics.dailyPace.toFixed(2)} / day</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="glass-card">
+          <div style={{ marginBottom: '1rem' }}>
+            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Alert History
+            </span>
+            <h3 style={{ fontSize: '1.4rem', marginTop: '0.6rem' }}>Recent Budget Signals</h3>
+          </div>
+          {alertHistory.length === 0 ? (
+            <p style={{ color: 'var(--text-secondary)' }}>BudgetSync has not detected any alerts yet. Your spending is operating within safe limits.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+              {alertHistory.slice(0, 6).map(alert => (
+                <div key={alert.id} className="alert-history-item">
+                  <div>
+                    <strong>{alert.title}</strong>
+                    <p>{alert.message}</p>
+                  </div>
+                  <span>{alert.timestamp}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Main Grid: Health, Forms & Transactions */}
